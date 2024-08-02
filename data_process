@@ -1,0 +1,75 @@
+# 文件读取  (输入、输出特征在此手动改)
+def get_Data(data_path, data_length):
+    df = pd.read_excel(data_path)
+    data = df.iloc[0:data_length, 0:15].values  # 转换为numpy数组
+    x, pulse_condition, step_condition, decay_condition = preprocess_data(data)  # 区分输入数据和条件数据
+    label_all = df.iloc[0:data_length, 0:15].values  # 假设标签也在这里处理
+    label = label_all[:, 3:]
+    return x, pulse_condition, step_condition, decay_condition, label
+
+
+# 数据预处理
+def normalization(data, pulse_condition, step_condition, decay_condition, label):
+    mm_x = MinMaxScaler()
+    mm_y = MinMaxScaler()
+    data = mm_x.fit_transform(data)
+    # 假设条件信息不需要归一化，或者根据需要对其进行归一化
+    label = mm_y.fit_transform(label)
+    return data, pulse_condition, step_condition, decay_condition, label, mm_x, mm_y
+
+
+# 时间向量转换
+def split_windows(data, pulse_condition, step_condition, decay_condition, label, input_window, output_window, t):
+    x, p_c, s_c, d_c, y = [], [], [], [], []
+    for i in range(len(data) - input_window - output_window + 1 - t):
+        _x = data[i:(i + input_window), :]
+        _pc = pulse_condition[i + input_window + t - 1, :]  # 假设条件对应于输出窗口的开始
+        _sc = step_condition[i + input_window + t - 1, :]  # 假设条件对应于输出窗口的开始
+        _dc = decay_condition[i + input_window + t - 1, :]  # 假设条件对应于输出窗口的开始
+        _y = label[i + input_window + t:i + input_window + output_window + t, :]
+        x.append(_x)
+        p_c.append(_pc)
+        s_c.append(_sc)
+        d_c.append(_dc)
+        y.append(_y)
+    return np.array(x), np.array(p_c), np.array(s_c), np.array(d_c), np.array(y)
+
+
+# 数据分离
+def split_data(x, pc, sc, dc, y, split_ratio1, split_ratio2):
+    train_size = int(len(y) * split_ratio1)
+    value_size = int(len(y) * split_ratio2)
+    test_size = len(y) - train_size - value_size
+
+    train_x = torch.Tensor(x[:train_size, :, :]).float()
+    train_pc = torch.Tensor(pc[:train_size, :]).float()
+    train_sc = torch.Tensor(sc[:train_size, :]).float()
+    train_dc = torch.Tensor(dc[:train_size, :]).float()
+    train_y = torch.Tensor(y[:train_size, :, :]).float()
+
+    value_x = torch.Tensor(x[train_size:train_size + value_size, :, :]).float()
+    value_pc = torch.Tensor(pc[train_size:train_size + value_size, :]).float()
+    value_sc = torch.Tensor(sc[train_size:train_size + value_size, :]).float()
+    value_dc = torch.Tensor(dc[train_size:train_size + value_size, :]).float()
+    value_y = torch.Tensor(y[train_size:train_size + value_size, :, :]).float()
+
+    test_x = torch.Tensor(x[train_size + value_size:, :, :]).float()
+    test_pc = torch.Tensor(pc[train_size + value_size:, :]).float()
+    test_sc = torch.Tensor(sc[train_size + value_size:, :]).float()
+    test_dc = torch.Tensor(dc[train_size + value_size:, :]).float()
+    test_y = torch.Tensor(y[train_size + value_size:, :, :]).float()
+
+    data_x = torch.Tensor(x[:, :, :]).float()
+    data_y = torch.Tensor(y[:, :, :]).float()
+
+    return train_x, train_pc, train_sc, train_dc, train_y, value_x, value_pc, value_sc, value_dc, value_y, test_x, test_pc, test_sc, test_dc, test_y, data_x, data_y
+
+
+def preprocess_data(data):
+    # 假设第一列是条件信息
+    pulse_condition = data[:, 0:1]  # 提取条件列
+    step_condition = data[:, 0:1]  # 提取条件列
+    decay_condition = data[:, 0:1]  # 提取条件列
+    x = data[:, 3:]  # 提取剩余作为输入数据
+    return x, pulse_condition, step_condition, decay_condition
+
