@@ -1,0 +1,63 @@
+class PositionalEncoding(nn.Module):
+    def __init__(self, hidden_dim, max_seq_len):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_seq_len, hidden_dim)
+
+        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-torch.log(torch.tensor(10000.0)) / hidden_dim))
+        pe[:, 0::2] = torch.sin(position * div_term)  # [0::2]
+        pe[:, 1::2] = torch.cos(position * div_term)  # [1::2]
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return x
+
+
+class TransformerModelWithCondition(nn.Module):
+    def __init__(self, input_dims, hidden_dim, output_dims, num_layers, num_heads, dropout, max_seq_len,
+                 condition_dim=1):
+        super(TransformerModelWithCondition, self).__init__()
+        self.num_inputs = len(input_dims)
+        self.num_outputs = len(output_dims)
+        self.input_window = input_dims[0]
+
+        self.input_embeddings = nn.ModuleList([nn.Linear(input_window, hidden_dim) for input_window in input_dims])
+        self.position_encoding = PositionalEncoding(hidden_dim, max_seq_len)
+        encoder_layer = nn.TransformerEncoderLayer(hidden_dim, num_heads, dim_feedforward=hidden_dim, dropout=dropout)
+        encoder_layer.self_attn.batch_first = True
+
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        decoder_layer = nn.TransformerDecoderLayer(hidden_dim, num_heads, dim_feedforward=hidden_dim, dropout=dropout)
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers, norm=None)
+        self.output_projections = nn.ModuleList([nn.Linear(hidden_dim, output_dim) for output_dim in output_dims])
+
+    def forward(self, inputs, pulse_condition ,step_condition ,decay_condition):
+
+        pulse_condition_expand = pulse_condition.unsqueeze(-1).expand(-1,  self.input_window, self.num_inputs)
+        step_condition_expand = step_condition.unsqueeze(-1).expand(-1,  self.input_window, self.num_inputs)
+        decay_condition_expand = decay_condition.unsqueeze(-1).expand(-1,  self.input_window, self.num_inputs)
+        # condition_expand = condition.unsqueeze(-1).expand(-1, -1, input_dim)  #
+        embedded_inputs = []
+        for i in range(self.num_inputs):
+            if i < input_dim:
+                embedded_input = self.input_embeddings[i](inputs[:, :, i])
+                embedded_pulse_condition = self.input_embeddings[i](pulse_condition_expand[:, :, i])
+                embedded_step_condition = self.input_embeddings[i](step_condition_expand[:, :, i])
+                embedded_decay_condition = self.input_embeddings[i](decay_condition_expand[:, :, i])
+
+                embedded_input = embedded_input + embedded_pulse_condition + embedded_step_condition +embedded_decay_condition
+
+                embedded_inputs.append(embedded_input)
+
+        position_encoded = self.position_encoding(torch.stack(embedded_inputs, dim=0))
+        encoded = self.encoder(position_encoded)
+        decoded = self.decoder(position_encoded, encoded)
+        outputs = []
+        for i in range(self.num_outputs):
+            output = self.output_projections[i](decoded[i])
+            outputs.append(output)
+        outputs = torch.stack(outputs, dim=1)
+        return outputs
+
