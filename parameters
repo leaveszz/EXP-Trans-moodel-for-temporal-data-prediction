@@ -1,0 +1,33 @@
+def tpe_objective(params, train_x, train_pc, train_sc, train_dc, train_y, value_x,value_pc, value_sc, value_dc, value_y):
+    # 模型、优化器等的设置
+    # 假设 `device` 已经在全局定义或根据需要传入此函数
+    global device  # 如果 `device` 是全局定义的
+    batch_size, num_heads, hidden_dim, num_layers, lr = (
+        int(params['batch_size']),
+        int(params['num_heads']),
+        int(params['hidden_dim']),
+        int(params['num_layers']),
+        params['lr']
+    )
+    hidden_dim = num_heads * hidden_dim * 2
+
+    # 初始化数据加载器，现在包含条件信息
+    train_dataset = Data.TensorDataset(train_x, torch.Tensor(train_pc),torch.Tensor(train_sc),torch.Tensor(train_dc), train_y)
+    train_loader = Data.DataLoader(dataset=train_dataset, batch_size=batch_size, drop_last=True)
+    value_dataset = Data.TensorDataset(value_x, torch.Tensor(value_pc),torch.Tensor(value_sc),torch.Tensor(value_dc), value_y)
+    value_loader = Data.DataLoader(dataset=value_dataset, batch_size=batch_size, drop_last=True)
+
+    model = TransformerModelWithCondition(input_dims, hidden_dim, output_dims, num_layers, num_heads, dropout,
+                                          max_seq_len).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    criterion = torch.nn.MSELoss()
+
+    # 训练和评估，注意传递条件信息
+    val_losses = []
+    for epoch in range(opt_epoch):
+        train_loss = train(model, train_loader, optimizer, criterion)
+        val_loss = evaluate(model, value_loader, optimizer, criterion)
+        val_losses.append(val_loss)
+        print('运行进度' + str(epoch) + '/' + str(opt_epoch))
+    return {'loss': val_losses[-1], 'status': STATUS_OK}
+
