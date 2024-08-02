@@ -1,0 +1,90 @@
+def predict(network, test_loader):
+    network.eval()
+    predictions = []
+
+    with torch.no_grad():
+        for (batch_x, batch_pulse_condition,batch_step_condition,batch_decay_condition, _) in test_loader:  # 更新以接收包含条件信息的数据
+            batch_x = batch_x.to(device)
+
+            batch_pulse_condition = batch_pulse_condition.to(device)
+            batch_step_condition = batch_step_condition.to(device)
+            batch_decay_condition = batch_decay_condition.to(device) # 确保 condition 是一个 Tensor
+
+            outputs = network(batch_x, batch_pulse_condition,batch_step_condition,batch_decay_condition)  # 同样传递条件信息
+
+            predictions.extend(outputs.cpu().numpy())
+
+    return np.array(predictions)
+
+
+def visualize_model_performance(transformer_losses, transformer_val_losses,
+                                data_inverse_transform, predictions_transformer_inverse,
+                                phrases, train_length, val_length, output_dim, best_params_df_transformer,
+                                mse_transformer, rmse_transformer):
+    # 设置中文字体和正确显示负号
+    matplotlib.rcParams['font.family'] = 'SimHei'
+    matplotlib.rcParams['axes.unicode_minus'] = False
+
+    # 可视化模型损失
+    plt.figure(figsize=(10, 6))
+    plt.plot(transformer_losses, label='Transformer Loss')
+    plt.plot(transformer_val_losses, label='Transformer Val Loss')
+
+    plt.title('Model Loss Comparison', fontsize=20, weight='bold')
+    plt.xlabel('Epoch', fontsize=16, weight='bold')
+    plt.legend(fontsize=10)
+    plt.savefig('./model_loss_comparison.jpeg', format='jpeg', transparent=True)
+    plt.close()
+
+    # 创建 DataFrame 保存损失和性能指标
+    losses_metrics_df = pd.DataFrame({
+        'Transformer Loss': transformer_losses,
+        'Transformer Val Loss': transformer_val_losses,
+
+        'MSE Transformer': [mse_transformer] * len(transformer_losses),
+        'RMSE Transformer': [rmse_transformer] * len(transformer_losses),
+
+    })
+
+    # 保存损失和性能指标到 Excel
+    with pd.ExcelWriter('TransformerConditionResults.xlsx') as writer:
+        losses_metrics_df.to_excel(writer, sheet_name='Losses and Metrics', index=False)
+        best_params_df_transformer.to_excel(writer, sheet_name='Best Params Transformer', index=False)
+
+    # 可视化预测结果并保存到 Excel
+    for i in range(0, output_dim):
+        plt.figure(figsize=(10, 6))
+        plt.plot(data_inverse_transform[:, i], label='Actual', color='blue', linewidth=2)
+        plt.plot(range(train_length + val_length, train_length + val_length + len(predictions_transformer_inverse)),
+                 predictions_transformer_inverse[:, i], label='Transformer Prediction', color='red', linestyle='dashed')
+
+        plt.axvline(x=train_length, color='gray', linestyle='--', linewidth=1)
+        plt.axvline(x=train_length + val_length, color='gray', linestyle='--', linewidth=1)
+        plt.xlabel('Time Step')
+
+        plt.ylabel(phrases[i +3])
+        plt.title(f'{phrases[i + 3]} Predictions Comparison')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(f'./{phrases[i + 3]}_predictions_comparison.jpeg', format='jpeg')
+        plt.close()
+
+        len_test_data = len(data_inverse_transform[train_length + val_length:])
+        len_transformer_pred = len(predictions_transformer_inverse)
+
+        min_len = min(len_test_data, len_transformer_pred)
+
+        test_data = data_inverse_transform[train_length + val_length:train_length + val_length + min_len, i]
+        transformer_pred = predictions_transformer_inverse[:min_len, i]
+
+        predictions_df = pd.DataFrame({
+            'Test Data': test_data,
+            'Transformer Predictions': transformer_pred,
+
+        })
+
+        sheet_name = phrases[i + 3] if i < len(phrases) else f"Sheet {i + 3}"
+
+        with pd.ExcelWriter('TransformerConditionResults.xlsx', mode='a', engine='openpyxl') as writer:
+            predictions_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
